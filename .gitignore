@@ -1,0 +1,30 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode and local editor state
+DerivedData/
+*.xcuserdata/
+*.xcuserstate
+.vscode/
+.idea/
+
+# macOS Finder metadata
+.DS_Store
+**/.DS_Store
+
+# App bundles and archives generated locally
+*.app/
+*.dSYM/
+*.xcarchive/
+
+# Local logs and temp files
+*.log
+*.tmp
+*.swp
+*~
+
+# Project-specific runtime cache/log files
+codex-quota.log
+codex-quota-mtmr.json
