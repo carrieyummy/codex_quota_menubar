@@ -6,6 +6,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, Quo
     private let popover = NSPopover()
     private let popoverController = QuotaPopoverViewController()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private var localMouseMonitor: Any?
+    private var globalMouseMonitor: Any?
     private var refreshTimer: Timer?
     private var isRefreshing = false
     private var latestSnapshot: QuotaSnapshot?
@@ -14,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, Quo
         NSApp.setActivationPolicy(.accessory)
         configureStatusItem()
         configurePopover()
+        configurePopoverCloseObservers()
         refresh()
 
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
@@ -25,6 +28,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, Quo
 
     func applicationWillTerminate(_ notification: Notification) {
         refreshTimer?.invalidate()
+        removePopoverEventMonitors()
+        NotificationCenter.default.removeObserver(self)
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
     func quotaPopoverDidRequestRefresh(_ controller: QuotaPopoverViewController) {
@@ -46,6 +52,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, Quo
 
     func popoverDidShow(_ notification: Notification) {
         applyPopoverChromeAppearance()
+        installPopoverEventMonitors()
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        removePopoverEventMonitors()
     }
 
     @objc private func togglePopover(_ sender: Any?) {
@@ -71,12 +82,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, Quo
     }
 
     private func configurePopover() {
-        popover.behavior = .semitransient
+        popover.behavior = .applicationDefined
         popover.delegate = self
         popover.animates = false
         popover.contentSize = popoverController.preferredPopoverSize
         popover.contentViewController = popoverController
         popoverController.delegate = self
+    }
+
+    private func configurePopoverCloseObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(closePopoverForExternalStateChange),
+            name: NSApplication.didResignActiveNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(closePopoverForExternalStateChange),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(closePopoverForExternalStateChange),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(closePopoverForExternalStateChange),
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func closePopoverForExternalStateChange(_ notification: Notification) {
+        guard popover.isShown else {
+            return
+        }
+
+        if popoverController.shouldKeepMainPopoverForAuxiliaryWindow {
+            return
+        }
+
+        popover.performClose(nil)
     }
 
     private func showPopover() {
@@ -122,6 +172,88 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, Quo
         view.wantsLayer = true
         view.layer?.backgroundColor = NSColor.clear.cgColor
         view.layer?.isOpaque = false
+    }
+
+    private func installPopoverEventMonitors() {
+        removePopoverEventMonitors()
+
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+            self?.closePopoverIfClickIsOutside(event)
+            return event
+        }
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
+            Task { @MainActor in
+                self?.closePopoverIfClickIsOutside(event)
+            }
+        }
+    }
+
+    private func removePopoverEventMonitors() {
+        if let localMouseMonitor {
+            NSEvent.removeMonitor(localMouseMonitor)
+            self.localMouseMonitor = nil
+        }
+
+        if let globalMouseMonitor {
+            NSEvent.removeMonitor(globalMouseMonitor)
+            self.globalMouseMonitor = nil
+        }
+    }
+
+    private func closePopoverIfClickIsOutside(_ event: NSEvent) {
+        guard popover.isShown else {
+            removePopoverEventMonitors()
+            return
+        }
+
+        if isInternalWindow(event.window) {
+            return
+        }
+
+        let mousePoint = NSEvent.mouseLocation
+        if isPointInsideStatusButton(mousePoint) || isPointInsideInternalWindow(mousePoint) {
+            return
+        }
+
+        popover.performClose(nil)
+    }
+
+    private func isInternalWindow(_ window: NSWindow?) -> Bool {
+        guard let window else {
+            return false
+        }
+
+        if window === popoverController.view.window || window === NSColorPanel.shared {
+            return true
+        }
+
+        return popoverController.auxiliaryWindows.contains { $0 === window }
+    }
+
+    private func isPointInsideInternalWindow(_ point: NSPoint) -> Bool {
+        if let window = popoverController.view.window, window.frame.contains(point) {
+            return true
+        }
+
+        if NSColorPanel.shared.isVisible && NSColorPanel.shared.frame.contains(point) {
+            return true
+        }
+
+        return popoverController.auxiliaryWindows.contains { $0.frame.contains(point) }
+    }
+
+    private func isPointInsideStatusButton(_ point: NSPoint) -> Bool {
+        guard
+            let button = statusItem.button,
+            let buttonWindow = button.window
+        else {
+            return false
+        }
+
+        let buttonRectInWindow = button.convert(button.bounds, to: nil)
+        let buttonRect = buttonWindow.convertToScreen(buttonRectInWindow)
+        return buttonRect.contains(point)
     }
 
     private func statusBarImage(color: NSColor) -> NSImage {

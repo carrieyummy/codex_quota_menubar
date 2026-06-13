@@ -7,7 +7,7 @@ protocol QuotaPopoverDelegate: AnyObject {
     func quotaPopoverDidChangeLayout(_ controller: QuotaPopoverViewController)
 }
 
-final class QuotaPopoverViewController: NSViewController {
+final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
     weak var delegate: QuotaPopoverDelegate?
 
     private let sparkVisibilityKey = "showSparkQuota"
@@ -24,7 +24,14 @@ final class QuotaPopoverViewController: NSViewController {
     private let quitButton = NSButton()
     private let sparkToggleButton = NSButton()
     private let themeToggleButton = NSButton()
+    private let opacityToggleButton = NSButton()
+    private let opacityPopover = NSPopover()
+    private let opacitySlider = NSSlider()
+    private let opacityValueLabel = NSTextField(labelWithString: "")
     private let sparkSection = NSStackView()
+    private var opacityLocalMouseMonitor: Any?
+    private var opacityGlobalMouseMonitor: Any?
+    private var isOpeningColorPanel = false
     private var sparkAvailable = false
     private var theme = QuotaTheme.load()
 
@@ -47,6 +54,14 @@ final class QuotaPopoverViewController: NSViewController {
 
     var backgroundOpacity: Double {
         theme.opacity
+    }
+
+    var auxiliaryWindows: [NSWindow] {
+        [opacityPopover.contentViewController?.view.window].compactMap { $0 }
+    }
+
+    var shouldKeepMainPopoverForAuxiliaryWindow: Bool {
+        isOpeningColorPanel || NSColorPanel.shared.isVisible || opacityPopover.isShown
     }
 
     private var isSparkVisible: Bool {
@@ -103,6 +118,12 @@ final class QuotaPopoverViewController: NSViewController {
             action: #selector(openTextColorPanel)
         )
         configureIconButton(
+            opacityToggleButton,
+            symbolName: "circle.lefthalf.filled",
+            tooltip: "窗口透明度",
+            action: #selector(toggleOpacityPopover)
+        )
+        configureIconButton(
             sparkToggleButton,
             symbolName: "eye",
             tooltip: "显示/隐藏 Spark 限额",
@@ -121,7 +142,7 @@ final class QuotaPopoverViewController: NSViewController {
             action: #selector(quitTapped)
         )
 
-        let header = NSStackView(views: [headerTitleLabel, statusLabel, NSView(), themeToggleButton, sparkToggleButton, refreshButton, quitButton])
+        let header = NSStackView(views: [headerTitleLabel, statusLabel, NSView(), themeToggleButton, opacityToggleButton, sparkToggleButton, refreshButton, quitButton])
         header.orientation = .horizontal
         header.alignment = .centerY
         header.spacing = 6
@@ -152,6 +173,7 @@ final class QuotaPopoverViewController: NSViewController {
             header.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
 
+        configureOpacityPopover()
         applyTheme()
         applySparkVisibility()
     }
@@ -192,8 +214,57 @@ final class QuotaPopoverViewController: NSViewController {
         ])
     }
 
+    private func configureOpacityPopover() {
+        let contentView = ThemedBackgroundView(frame: NSRect(x: 0, y: 0, width: 210, height: 54))
+        contentView.backgroundColor = theme.backgroundColor
+
+        let titleLabel = NSTextField(labelWithString: "透明度")
+        titleLabel.font = .systemFont(ofSize: 12, weight: .bold)
+        titleLabel.alignment = .left
+
+        opacitySlider.minValue = QuotaTheme.minOpacity
+        opacitySlider.maxValue = QuotaTheme.maxOpacity
+        opacitySlider.doubleValue = theme.opacity
+        opacitySlider.isContinuous = true
+        opacitySlider.target = self
+        opacitySlider.action = #selector(opacitySliderChanged)
+        opacitySlider.translatesAutoresizingMaskIntoConstraints = false
+
+        opacityValueLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .bold)
+        opacityValueLabel.alignment = .right
+
+        let stack = NSStackView(views: [titleLabel, opacitySlider, opacityValueLabel])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            opacitySlider.widthAnchor.constraint(equalToConstant: 104),
+            opacityValueLabel.widthAnchor.constraint(equalToConstant: 34),
+            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -10),
+            stack.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
+        ])
+
+        let viewController = NSViewController()
+        viewController.view = contentView
+
+        opacityPopover.behavior = .applicationDefined
+        opacityPopover.delegate = self
+        opacityPopover.animates = false
+        opacityPopover.contentSize = contentView.frame.size
+        opacityPopover.contentViewController = viewController
+
+        updateOpacityControls()
+    }
+
     private func applyTheme() {
         backgroundView.backgroundColor = theme.backgroundColor
+        if let opacityBackgroundView = opacityPopover.contentViewController?.view as? ThemedBackgroundView {
+            opacityBackgroundView.backgroundColor = theme.backgroundColor
+        }
         headerTitleLabel.textColor = theme.primaryTextColor
         statusLabel.textColor = theme.mutedTextColor
         codexTitleLabel.textColor = theme.primaryTextColor
@@ -203,9 +274,22 @@ final class QuotaPopoverViewController: NSViewController {
         sparkFiveHourRow.applyTheme(theme)
         sparkWeeklyRow.applyTheme(theme)
         themeToggleButton.contentTintColor = theme.primaryTextColor
+        opacityToggleButton.contentTintColor = theme.primaryTextColor
         sparkToggleButton.contentTintColor = theme.primaryTextColor
         refreshButton.contentTintColor = theme.primaryTextColor
         quitButton.contentTintColor = theme.primaryTextColor
+        applyOpacityPopoverTheme()
+    }
+
+    private func applyOpacityPopoverTheme() {
+        guard let stack = opacityPopover.contentViewController?.view.subviews.first as? NSStackView else {
+            return
+        }
+
+        for case let label as NSTextField in stack.arrangedSubviews {
+            label.textColor = label === opacityValueLabel ? theme.mutedTextColor : theme.primaryTextColor
+        }
+        updateOpacityControls()
     }
 
     private func applySparkVisibility() {
@@ -224,7 +308,144 @@ final class QuotaPopoverViewController: NSViewController {
         applySparkVisibility()
     }
 
+    @objc private func toggleOpacityPopover() {
+        if opacityPopover.isShown {
+            opacityPopover.performClose(nil)
+            return
+        }
+
+        updateOpacityControls()
+        opacityPopover.show(relativeTo: opacityToggleButton.bounds, of: opacityToggleButton, preferredEdge: .maxY)
+        installOpacityPopoverEventMonitors()
+        DispatchQueue.main.async { [weak self] in
+            self?.applyAuxiliaryPopoverChromeAppearance()
+        }
+    }
+
+    @objc private func opacitySliderChanged() {
+        theme.opacity = opacitySlider.doubleValue
+        theme.save()
+        applyTheme()
+        delegate?.quotaPopoverDidChangeLayout(self)
+    }
+
+    private func updateOpacityControls() {
+        opacitySlider.doubleValue = theme.opacity
+        opacityValueLabel.stringValue = "\(Int(round(theme.opacity)))%"
+    }
+
+    private func applyAuxiliaryPopoverChromeAppearance() {
+        guard let window = opacityPopover.contentViewController?.view.window else {
+            return
+        }
+
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = theme.opacity > 0
+
+        makeTransparent(window.contentView)
+
+        var ancestor = opacityPopover.contentViewController?.view.superview
+        while let view = ancestor {
+            makeTransparent(view)
+            ancestor = view.superview
+        }
+    }
+
+    private func makeTransparent(_ view: NSView?) {
+        guard let view else {
+            return
+        }
+
+        if let visualEffectView = view as? NSVisualEffectView {
+            visualEffectView.state = .inactive
+            visualEffectView.material = .contentBackground
+        }
+
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.clear.cgColor
+        view.layer?.isOpaque = false
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        if notification.object as? NSPopover === opacityPopover {
+            saveOpacityFromSlider()
+            removeOpacityPopoverEventMonitors()
+        }
+    }
+
+    private func saveOpacityFromSlider() {
+        theme.opacity = opacitySlider.doubleValue
+        theme.save()
+        updateOpacityControls()
+        applyTheme()
+        delegate?.quotaPopoverDidChangeLayout(self)
+    }
+
+    private func installOpacityPopoverEventMonitors() {
+        removeOpacityPopoverEventMonitors()
+
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        opacityLocalMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+            self?.closeOpacityPopoverIfClickIsOutside(event)
+            return event
+        }
+        opacityGlobalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
+            Task { @MainActor in
+                self?.closeOpacityPopoverIfClickIsOutside(event)
+            }
+        }
+    }
+
+    private func removeOpacityPopoverEventMonitors() {
+        if let opacityLocalMouseMonitor {
+            NSEvent.removeMonitor(opacityLocalMouseMonitor)
+            self.opacityLocalMouseMonitor = nil
+        }
+
+        if let opacityGlobalMouseMonitor {
+            NSEvent.removeMonitor(opacityGlobalMouseMonitor)
+            self.opacityGlobalMouseMonitor = nil
+        }
+    }
+
+    private func closeOpacityPopoverIfClickIsOutside(_ event: NSEvent) {
+        guard opacityPopover.isShown else {
+            removeOpacityPopoverEventMonitors()
+            return
+        }
+
+        if event.window === opacityPopover.contentViewController?.view.window {
+            return
+        }
+
+        let mousePoint = NSEvent.mouseLocation
+        if isPointInsideOpacityPopover(mousePoint) || isPointInsideOpacityButton(mousePoint) {
+            return
+        }
+
+        opacityPopover.performClose(nil)
+    }
+
+    private func isPointInsideOpacityPopover(_ point: NSPoint) -> Bool {
+        guard let window = opacityPopover.contentViewController?.view.window else {
+            return false
+        }
+        return window.frame.contains(point)
+    }
+
+    private func isPointInsideOpacityButton(_ point: NSPoint) -> Bool {
+        guard let window = opacityToggleButton.window else {
+            return false
+        }
+
+        let buttonRectInWindow = opacityToggleButton.convert(opacityToggleButton.bounds, to: nil)
+        let buttonRect = window.convertToScreen(buttonRectInWindow)
+        return buttonRect.contains(point)
+    }
+
     @objc private func openTextColorPanel() {
+        isOpeningColorPanel = true
         let colorPanel = NSColorPanel.shared
         colorPanel.showsAlpha = false
         colorPanel.color = theme.textColor
@@ -233,6 +454,9 @@ final class QuotaPopoverViewController: NSViewController {
         NSApp.activate(ignoringOtherApps: true)
         colorPanel.makeKeyAndOrderFront(nil)
         positionColorPanel(colorPanel)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.isOpeningColorPanel = false
+        }
     }
 
     @objc private func textColorPanelChanged(_ sender: NSColorPanel) {
