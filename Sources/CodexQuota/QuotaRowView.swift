@@ -32,16 +32,16 @@ final class QuotaRowView: NSView {
     private func setup() {
         translatesAutoresizingMaskIntoConstraints = false
 
-        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 12, weight: .bold)
         titleLabel.textColor = .labelColor
         titleLabel.alignment = .left
         titleLabel.lineBreakMode = .byTruncatingTail
 
-        valueLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        valueLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .bold)
         valueLabel.textColor = .labelColor
         valueLabel.alignment = .left
 
-        resetLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        resetLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .bold)
         resetLabel.textColor = .secondaryLabelColor
         resetLabel.alignment = .left
 
@@ -53,15 +53,15 @@ final class QuotaRowView: NSView {
         let stack = NSStackView(views: [titleLabel, barView, rightStack])
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = 8
+        stack.spacing = 4
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(stack)
 
         NSLayoutConstraint.activate([
-            titleLabel.widthAnchor.constraint(equalToConstant: 48),
-            barView.widthAnchor.constraint(equalToConstant: 94),
-            barView.heightAnchor.constraint(equalToConstant: 16),
+            titleLabel.widthAnchor.constraint(equalToConstant: 42),
+            barView.widthAnchor.constraint(equalToConstant: 108),
+            barView.heightAnchor.constraint(equalToConstant: 12),
             valueLabel.widthAnchor.constraint(equalToConstant: 42),
             resetLabel.widthAnchor.constraint(equalToConstant: 80),
             rightStack.widthAnchor.constraint(equalToConstant: 128),

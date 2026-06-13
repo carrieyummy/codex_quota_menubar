@@ -90,10 +90,10 @@ final class QuotaPopoverViewController: NSViewController {
     }
 
     private func setup() {
-        headerTitleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        headerTitleLabel.font = .systemFont(ofSize: 14, weight: .bold)
         headerTitleLabel.alignment = .left
 
-        statusLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        statusLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .bold)
         statusLabel.lineBreakMode = .byTruncatingTail
 
         configureIconButton(
