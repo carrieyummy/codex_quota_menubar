@@ -1,12 +1,23 @@
 import AppKit
 
+/// 额度弹窗向宿主应用代理发送的用户操作事件。
 @MainActor
 protocol QuotaPopoverDelegate: AnyObject {
+    /// 请求重新读取额度。
+    ///
+    /// - Parameter controller: 发起请求的弹窗控制器。
     func quotaPopoverDidRequestRefresh(_ controller: QuotaPopoverViewController)
+    /// 请求退出应用。
+    ///
+    /// - Parameter controller: 发起请求的弹窗控制器。
     func quotaPopoverDidRequestQuit(_ controller: QuotaPopoverViewController)
+    /// 通知宿主弹窗内容高度或显示状态已改变。
+    ///
+    /// - Parameter controller: 布局发生变化的弹窗控制器。
     func quotaPopoverDidChangeLayout(_ controller: QuotaPopoverViewController)
 }
 
+/// 显示 Codex 额度详情、刷新状态、Spark 可见性和外观设置的弹窗控制器。
 final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
     weak var delegate: QuotaPopoverDelegate?
 
@@ -35,6 +46,7 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
     private var sparkAvailable = false
     private var theme = QuotaTheme.load()
 
+    /// 用户持久化的 Spark 额度显示开关。
     private var showSpark: Bool {
         get {
             UserDefaults.standard.object(forKey: sparkVisibilityKey) as? Bool ?? true
@@ -44,36 +56,56 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         }
     }
 
+    /// 当前内容对应的主弹窗推荐尺寸。
+    ///
+    /// - Returns: Spark 可见时使用较高尺寸，否则使用紧凑尺寸。
     var preferredPopoverSize: NSSize {
         NSSize(width: 306, height: isSparkVisible ? 178 : 116)
     }
 
+    /// 当前状态栏标题是否应显示 Spark 额度。
+    ///
+    /// - Returns: Spark 数据可用且用户开启显示时为 `true`。
     var showsSparkQuota: Bool {
         isSparkVisible
     }
 
+    /// 当前弹窗背景不透明度百分比。
+    ///
+    /// - Returns: 0...95 范围内的透明度设置。
     var backgroundOpacity: Double {
         theme.opacity
     }
 
+    /// 主弹窗以外仍属于应用内部的辅助窗口。
+    ///
+    /// - Returns: 当前可用的辅助窗口列表，用于外部点击判断。
     var auxiliaryWindows: [NSWindow] {
         [opacityPopover.contentViewController?.view.window].compactMap { $0 }
     }
 
+    /// 外部状态变化时是否应保留主弹窗。
+    ///
+    /// - Returns: 正在打开颜色面板、颜色面板可见或透明度弹窗可见时返回 `true`。
     var shouldKeepMainPopoverForAuxiliaryWindow: Bool {
         isOpeningColorPanel || NSColorPanel.shared.isVisible || opacityPopover.isShown
     }
 
+    /// Spark 区块是否实际可见。
     private var isSparkVisible: Bool {
         sparkAvailable && showSpark
     }
 
+    /// 创建控制器根视图并构建弹窗内容。
     override func loadView() {
         backgroundView.frame = NSRect(origin: .zero, size: preferredPopoverSize)
         view = backgroundView
         setup()
     }
 
+    /// 用最新额度快照更新所有额度行和刷新状态。
+    ///
+    /// - Parameter snapshot: app-server 返回并解析后的额度快照。
     func update(snapshot: QuotaSnapshot) {
         codexFiveHourRow.update(with: snapshot.codex.fiveHour)
         codexWeeklyRow.update(with: snapshot.codex.weekly)
@@ -90,6 +122,9 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         applySparkVisibility()
     }
 
+    /// 设置刷新中的 UI 状态。
+    ///
+    /// - Parameter refreshing: 为 `true` 时禁用刷新按钮并显示“刷新中”。
     func setRefreshing(_ refreshing: Bool) {
         refreshButton.isEnabled = !refreshing
         if refreshing {
@@ -98,12 +133,16 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         }
     }
 
+    /// 展示读取失败消息并恢复刷新按钮。
+    ///
+    /// - Parameter message: 面向用户展示的错误文本。
     func showError(_ message: String) {
         refreshButton.isEnabled = true
         statusLabel.textColor = .systemRed
         statusLabel.stringValue = message
     }
 
+    /// 构建主弹窗的控件树、约束、辅助弹窗和初始主题。
     private func setup() {
         headerTitleLabel.font = .systemFont(ofSize: 14, weight: .bold)
         headerTitleLabel.alignment = .left
@@ -178,6 +217,12 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         applySparkVisibility()
     }
 
+    /// 创建包含标题和多行额度信息的垂直区块。
+    ///
+    /// - Parameters:
+    ///   - titleLabel: 区块标题标签。
+    ///   - rows: 额度行视图列表。
+    /// - Returns: 已配置布局和标题样式的区块视图。
     private func makeSection(titleLabel: NSTextField, rows: [NSView]) -> NSStackView {
         configureSectionTitle(titleLabel)
         let rowStack = NSStackView(views: rows)
@@ -192,6 +237,9 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         return section
     }
 
+    /// 配置区块标题标签的字体、颜色和截断方式。
+    ///
+    /// - Parameter label: 要配置的标题标签。
     private func configureSectionTitle(_ label: NSTextField) {
         label.font = .systemFont(ofSize: 12, weight: .bold)
         label.textColor = .labelColor
@@ -199,6 +247,13 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         label.lineBreakMode = .byTruncatingTail
     }
 
+    /// 配置统一风格的图标按钮。
+    ///
+    /// - Parameters:
+    ///   - button: 要配置的按钮实例。
+    ///   - symbolName: SF Symbols 名称。
+    ///   - tooltip: 鼠标悬停提示和无障碍描述。
+    ///   - action: 点击按钮时发送给控制器的 selector。
     private func configureIconButton(_ button: NSButton, symbolName: String, tooltip: String, action: Selector) {
         button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: tooltip)
         button.imagePosition = .imageOnly
@@ -214,6 +269,7 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         ])
     }
 
+    /// 构建透明度调整辅助弹窗。
     private func configureOpacityPopover() {
         let contentView = ThemedBackgroundView(frame: NSRect(x: 0, y: 0, width: 210, height: 54))
         contentView.backgroundColor = theme.backgroundColor
@@ -260,6 +316,7 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         updateOpacityControls()
     }
 
+    /// 将当前主题应用到主弹窗、辅助弹窗和全部子控件。
     private func applyTheme() {
         backgroundView.backgroundColor = theme.backgroundColor
         if let opacityBackgroundView = opacityPopover.contentViewController?.view as? ThemedBackgroundView {
@@ -281,6 +338,7 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         applyOpacityPopoverTheme()
     }
 
+    /// 将当前主题应用到透明度辅助弹窗内的标签。
     private func applyOpacityPopoverTheme() {
         guard let stack = opacityPopover.contentViewController?.view.subviews.first as? NSStackView else {
             return
@@ -292,6 +350,7 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         updateOpacityControls()
     }
 
+    /// 根据 Spark 数据可用性和用户开关更新区块显示、按钮图标和弹窗尺寸。
     private func applySparkVisibility() {
         sparkSection.isHidden = !isSparkVisible
         sparkToggleButton.isHidden = !sparkAvailable
@@ -303,11 +362,13 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         delegate?.quotaPopoverDidChangeLayout(self)
     }
 
+    /// 切换 Spark 额度区块显示状态。
     @objc private func toggleSparkTapped() {
         showSpark.toggle()
         applySparkVisibility()
     }
 
+    /// 打开或关闭透明度调整弹窗。
     @objc private func toggleOpacityPopover() {
         if opacityPopover.isShown {
             opacityPopover.performClose(nil)
@@ -322,6 +383,7 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         }
     }
 
+    /// 响应透明度滑块变化并立即保存主题。
     @objc private func opacitySliderChanged() {
         theme.opacity = opacitySlider.doubleValue
         theme.save()
@@ -329,11 +391,13 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         delegate?.quotaPopoverDidChangeLayout(self)
     }
 
+    /// 用当前主题值刷新透明度滑块和百分比文本。
     private func updateOpacityControls() {
         opacitySlider.doubleValue = theme.opacity
         opacityValueLabel.stringValue = "\(Int(round(theme.opacity)))%"
     }
 
+    /// 将透明度辅助弹窗窗口和祖先视图调整为透明背景。
     private func applyAuxiliaryPopoverChromeAppearance() {
         guard let window = opacityPopover.contentViewController?.view.window else {
             return
@@ -352,6 +416,9 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         }
     }
 
+    /// 清除视图背景并禁用视觉效果视图的活跃材质。
+    ///
+    /// - Parameter view: 需要透明化的视图；为 `nil` 时不处理。
     private func makeTransparent(_ view: NSView?) {
         guard let view else {
             return
@@ -367,6 +434,9 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         view.layer?.isOpaque = false
     }
 
+    /// 处理透明度辅助弹窗关闭事件，保存最终滑块值并清理事件监听。
+    ///
+    /// - Parameter notification: `NSPopover` 关闭通知。
     func popoverDidClose(_ notification: Notification) {
         if notification.object as? NSPopover === opacityPopover {
             saveOpacityFromSlider()
@@ -374,6 +444,7 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         }
     }
 
+    /// 保存透明度滑块当前值并同步主题和布局。
     private func saveOpacityFromSlider() {
         theme.opacity = opacitySlider.doubleValue
         theme.save()
@@ -382,6 +453,7 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         delegate?.quotaPopoverDidChangeLayout(self)
     }
 
+    /// 安装透明度辅助弹窗的外部点击监听。
     private func installOpacityPopoverEventMonitors() {
         removeOpacityPopoverEventMonitors()
 
@@ -397,6 +469,7 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         }
     }
 
+    /// 移除透明度辅助弹窗的外部点击监听。
     private func removeOpacityPopoverEventMonitors() {
         if let opacityLocalMouseMonitor {
             NSEvent.removeMonitor(opacityLocalMouseMonitor)
@@ -409,6 +482,9 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         }
     }
 
+    /// 根据鼠标事件判断是否需要关闭透明度辅助弹窗。
+    ///
+    /// - Parameter event: AppKit 鼠标事件，包含事件所在窗口。
     private func closeOpacityPopoverIfClickIsOutside(_ event: NSEvent) {
         guard opacityPopover.isShown else {
             removeOpacityPopoverEventMonitors()
@@ -427,6 +503,10 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         opacityPopover.performClose(nil)
     }
 
+    /// 判断屏幕坐标是否位于透明度辅助弹窗内。
+    ///
+    /// - Parameter point: 屏幕坐标点。
+    /// - Returns: 点位于透明度弹窗内时返回 `true`。
     private func isPointInsideOpacityPopover(_ point: NSPoint) -> Bool {
         guard let window = opacityPopover.contentViewController?.view.window else {
             return false
@@ -434,6 +514,10 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         return window.frame.contains(point)
     }
 
+    /// 判断屏幕坐标是否位于透明度按钮内。
+    ///
+    /// - Parameter point: 屏幕坐标点。
+    /// - Returns: 点位于透明度按钮范围内时返回 `true`。
     private func isPointInsideOpacityButton(_ point: NSPoint) -> Bool {
         guard let window = opacityToggleButton.window else {
             return false
@@ -444,6 +528,7 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         return buttonRect.contains(point)
     }
 
+    /// 打开系统颜色面板并设置当前文字颜色。
     @objc private func openTextColorPanel() {
         isOpeningColorPanel = true
         let colorPanel = NSColorPanel.shared
@@ -459,12 +544,18 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         }
     }
 
+    /// 响应系统颜色面板变化并保存文字颜色。
+    ///
+    /// - Parameter sender: 触发变化的系统颜色面板。
     @objc private func textColorPanelChanged(_ sender: NSColorPanel) {
         theme.textColor = sender.color
         theme.save()
         applyTheme()
     }
 
+    /// 将颜色面板放置在主弹窗附近且尽量保持在可见屏幕区域内。
+    ///
+    /// - Parameter colorPanel: 需要定位的系统颜色面板。
     private func positionColorPanel(_ colorPanel: NSColorPanel) {
         guard let quotaWindow = view.window else {
             return
@@ -503,14 +594,20 @@ final class QuotaPopoverViewController: NSViewController, NSPopoverDelegate {
         colorPanel.setFrameOrigin(origin)
     }
 
+    /// 将刷新按钮点击转发给代理。
     @objc private func refreshTapped() {
         delegate?.quotaPopoverDidRequestRefresh(self)
     }
 
+    /// 将退出按钮点击转发给代理。
     @objc private func quitTapped() {
         delegate?.quotaPopoverDidRequestQuit(self)
     }
 
+    /// 将快照读取时间格式化为弹窗状态文本。
+    ///
+    /// - Parameter date: 读取完成时间。
+    /// - Returns: `HH:mm:ss` 格式的本地时间字符串。
     private func formatFetchedAt(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")

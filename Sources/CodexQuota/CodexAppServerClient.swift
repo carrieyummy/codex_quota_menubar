@@ -1,9 +1,17 @@
 import Foundation
 
+/// 通过 stdio JSON-RPC 与本机 Codex app-server 通信的客户端。
+///
+/// 该类型内部使用串行队列保护进程、请求 ID、待完成回调与 stdout 缓冲区。
 final class CodexAppServerClient: @unchecked Sendable {
+    /// JSON-RPC 响应完成回调。
+    ///
+    /// - Parameter Result: 成功时为响应对象字典，失败时为启动、通信或服务端错误。
     private typealias ResponseCompletion = @Sendable (Result<[String: Any], Error>) -> Void
 
+    /// Codex.app 内置命令行程序路径。
     private let codexPath = "/Applications/Codex.app/Contents/Resources/codex"
+    /// 串行化所有进程与协议状态访问的队列。
     private let queue = DispatchQueue(label: "CodexAppServerClient")
     private var process: Process?
     private var stdinPipe: Pipe?
@@ -16,6 +24,9 @@ final class CodexAppServerClient: @unchecked Sendable {
         process?.terminate()
     }
 
+    /// 读取当前账号的 Codex 额度。
+    ///
+    /// - Parameter completion: 异步完成回调；成功时返回 `QuotaSnapshot`，失败时返回 `QuotaError` 或系统错误。
     func readRateLimits(completion: @escaping @Sendable (Result<QuotaSnapshot, Error>) -> Void) {
         queue.async {
             do {
@@ -36,6 +47,9 @@ final class CodexAppServerClient: @unchecked Sendable {
         }
     }
 
+    /// 确保 app-server 进程已启动并连接到 stdio。
+    ///
+    /// - Throws: 当 Codex 二进制不存在、不可执行或进程启动失败时抛出错误。
     private func ensureStarted() throws {
         if let process, process.isRunning {
             return
@@ -82,6 +96,9 @@ final class CodexAppServerClient: @unchecked Sendable {
         self.stdinPipe = stdinPipe
     }
 
+    /// 首次请求前执行 app-server 初始化握手。
+    ///
+    /// - Parameter completion: 初始化完成回调；已经初始化时立即返回成功。
     private func initializeIfNeeded(completion: @escaping ResponseCompletion) {
         if initialized {
             completion(.success([:]))
@@ -111,6 +128,12 @@ final class CodexAppServerClient: @unchecked Sendable {
         }
     }
 
+    /// 发送一条 JSON-RPC 请求到 app-server。
+    ///
+    /// - Parameters:
+    ///   - method: JSON-RPC 方法名，例如 `initialize` 或 `account/rateLimits/read`。
+    ///   - params: 请求参数字典；无参数时传 `nil`。
+    ///   - completion: 与请求 ID 绑定的响应回调。
     private func send(
         method: String,
         params: [String: Any]?,
@@ -143,6 +166,9 @@ final class CodexAppServerClient: @unchecked Sendable {
         }
     }
 
+    /// 消费 stdout 字节流并按换行切分 JSON-RPC 消息。
+    ///
+    /// - Parameter data: app-server stdout 新读取到的数据块。
     private func consumeStdout(_ data: Data) {
         stdoutBuffer.append(data)
 
@@ -154,6 +180,9 @@ final class CodexAppServerClient: @unchecked Sendable {
         }
     }
 
+    /// 解析并分发单行 JSON-RPC 响应。
+    ///
+    /// - Parameter data: 不包含换行符的 UTF-8 JSON 数据。
     private func handleLine(_ data: Data) {
         guard
             let object = try? JSONSerialization.jsonObject(with: data),
@@ -174,6 +203,9 @@ final class CodexAppServerClient: @unchecked Sendable {
         }
     }
 
+    /// 让所有待处理请求以同一个错误失败。
+    ///
+    /// - Parameter error: 要传给每个待完成回调的错误。
     private func failAll(_ error: Error) {
         let completions = pending.values
         pending.removeAll()
@@ -182,6 +214,10 @@ final class CodexAppServerClient: @unchecked Sendable {
         }
     }
 
+    /// 将 app-server 原始响应转换成 UI 使用的额度快照。
+    ///
+    /// - Parameter response: `account/rateLimits/read` 返回的 JSON 对象。
+    /// - Returns: 成功时返回 `QuotaSnapshot`，缺少必要额度字段时返回失败。
     private static func parseRateLimits(_ response: [String: Any]) -> Result<QuotaSnapshot, Error> {
         let codexLimits: [String: Any]?
         let sparkLimits: [String: Any]?
@@ -208,6 +244,10 @@ final class CodexAppServerClient: @unchecked Sendable {
         return .success(QuotaSnapshot(codex: codexBucket, spark: sparkBucket, fetchedAt: Date()))
     }
 
+    /// 从按 limitId 分组的响应中查找 Spark 额度。
+    ///
+    /// - Parameter byId: app-server 返回的 `rateLimitsByLimitId` 字典。
+    /// - Returns: 找到的 Spark 限额对象；未返回 Spark 额度时为 `nil`。
     private static func findSparkLimits(in byId: [String: Any]) -> [String: Any]? {
         if let direct = byId["codex_bengalfox"] as? [String: Any] {
             return direct
@@ -227,6 +267,12 @@ final class CodexAppServerClient: @unchecked Sendable {
         return nil
     }
 
+    /// 将单个模型的原始额度对象解析为 `QuotaBucket`。
+    ///
+    /// - Parameters:
+    ///   - title: UI 展示名称。
+    ///   - limits: 包含 `primary` 与 `secondary` 的原始额度对象。
+    /// - Returns: 解析成功的额度桶；缺少任一窗口时为 `nil`。
     private static func parseBucket(_ title: String, _ limits: [String: Any]) -> QuotaBucket? {
         guard
             let primary = limits["primary"] as? [String: Any],
@@ -240,6 +286,12 @@ final class CodexAppServerClient: @unchecked Sendable {
         return QuotaBucket(title: title, fiveHour: fiveHour, weekly: weekly)
     }
 
+    /// 将单个窗口的原始额度对象解析为 `QuotaWindow`。
+    ///
+    /// - Parameters:
+    ///   - title: UI 展示名称。
+    ///   - value: 包含 `usedPercent` 与可选 `resetsAt` 的原始窗口对象。
+    /// - Returns: 解析成功的限额窗口；缺少 `usedPercent` 时为 `nil`。
     private static func parseWindow(_ title: String, _ value: [String: Any]) -> QuotaWindow? {
         guard let usedPercent = value["usedPercent"] as? Int else {
             return nil

@@ -1,22 +1,35 @@
 import AppKit
 
+/// 用细线渐变条展示剩余额度百分比的视图。
 final class SegmentedBatteryView: NSView {
+    /// 当前剩余百分比。
+    ///
+    /// 期望范围为 0...100；绘制时会再次夹紧到该范围。
     var percent: Int = 0 {
         didSet {
             needsDisplay = true
         }
     }
 
+    /// 预留的分段数量配置。
+    ///
+    /// 当前绘制样式为连续细线渐变，保留该属性便于后续恢复分段样式。
     var segmentCount: Int = 20 {
         didSet {
             needsDisplay = true
         }
     }
 
+    /// Auto Layout 未给定尺寸时的默认内容尺寸。
+    ///
+    /// - Returns: 适合弹窗额度行的宽高。
     override var intrinsicContentSize: NSSize {
         NSSize(width: 160, height: 12)
     }
 
+    /// 绘制背景轨道和表示剩余额度的渐变填充。
+    ///
+    /// - Parameter dirtyRect: 需要重绘的区域。
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 

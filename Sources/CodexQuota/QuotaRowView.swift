@@ -1,21 +1,31 @@
 import AppKit
 
+/// 弹窗内展示单个额度窗口的行视图。
 final class QuotaRowView: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let barView = SegmentedBatteryView()
     private let valueLabel = NSTextField(labelWithString: "--")
     private let resetLabel = NSTextField(labelWithString: "--")
 
+    /// 使用代码创建额度行视图。
+    ///
+    /// - Parameter frameRect: 初始视图 frame。
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setup()
     }
 
+    /// 使用 Interface Builder 解码创建额度行视图。
+    ///
+    /// - Parameter coder: 归档解码器。
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         setup()
     }
 
+    /// 用额度窗口更新标题、进度条、剩余百分比和重置时间。
+    ///
+    /// - Parameter window: 要展示的额度窗口数据。
     func update(with window: QuotaWindow) {
         titleLabel.stringValue = window.title
         barView.percent = window.remainingPercent
@@ -23,12 +33,16 @@ final class QuotaRowView: NSView {
         resetLabel.stringValue = formatReset(window.resetAt)
     }
 
+    /// 应用弹窗主题颜色。
+    ///
+    /// - Parameter theme: 当前用户主题，包含文字颜色和透明度。
     func applyTheme(_ theme: QuotaTheme) {
         titleLabel.textColor = theme.primaryTextColor
         valueLabel.textColor = theme.primaryTextColor
         resetLabel.textColor = theme.mutedTextColor
     }
 
+    /// 构建行内控件、字体、间距和固定宽度约束。
     private func setup() {
         translatesAutoresizingMaskIntoConstraints = false
 
@@ -73,6 +87,10 @@ final class QuotaRowView: NSView {
         ])
     }
 
+    /// 将重置时间格式化为行内显示文本。
+    ///
+    /// - Parameter date: 重置时间；为 `nil` 时显示“无重置”。
+    /// - Returns: 当天时间显示为 `HH:mm`，非当天显示为 `M/d HH:mm`。
     private func formatReset(_ date: Date?) -> String {
         guard let date else {
             return "无重置"
