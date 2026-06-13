@@ -78,7 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, Quo
         button.target = self
         button.action = #selector(togglePopover)
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        statusItem.length = NSStatusItem.variableLength
+        updateStatusItemLength(for: button.title)
     }
 
     private func configurePopover() {
@@ -338,7 +338,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, Quo
 
         button.title = title
         button.image = statusBarImage(color: color)
-        statusItem.length = NSStatusItem.variableLength
+        updateStatusItemLength(for: title)
+        flushStatusItemLayout()
+    }
+
+    private func updateStatusItemLength(for title: String) {
+        guard let button = statusItem.button else {
+            statusItem.length = NSStatusItem.variableLength
+            return
+        }
+
+        let font = button.font ?? NSFont.menuBarFont(ofSize: 0)
+        let textWidth = ceil((title as NSString).size(withAttributes: [.font: font]).width)
+        let imageWidth: CGFloat = button.image == nil ? 0 : 16
+        let horizontalPadding: CGFloat = 10
+        statusItem.length = max(34, textWidth + imageWidth + horizontalPadding)
+    }
+
+    private func flushStatusItemLayout() {
+        guard let button = statusItem.button else {
+            return
+        }
+
+        button.needsLayout = true
+        button.layoutSubtreeIfNeeded()
+        button.window?.displayIfNeeded()
     }
 
     private func statusBarPart(prefix: String, window: QuotaWindow) -> String {
